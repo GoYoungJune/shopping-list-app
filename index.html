@@ -229,9 +229,14 @@
   </div>
 </div>
 
-<script>
-  const STORAGE_KEY = 'shopping-list-v1';
-  let items = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+<script type="module">
+  import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
+
+  const SUPABASE_URL = 'https://zblodruvqklgewwvxcwc.supabase.co';
+  const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpibG9kcnV2cWtsZ2V3d3Z4Y3djIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODAyNjc1MzYsImV4cCI6MjA5NTg0MzUzNn0.jQ4SSHcXdRKnZM6VfPLyoA2F6t0YXj_SbanU8x_5T5I';
+  const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+
+  let items = [];
   let filter = 'all';
 
   const input    = document.getElementById('input');
@@ -240,8 +245,15 @@
   const countEl  = document.getElementById('count');
   const clearBtn = document.getElementById('clearBtn');
 
-  function save() {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
+  async function loadItems() {
+    const { data, error } = await supabase
+      .from('shopping_items')
+      .select('*')
+      .order('created_at', { ascending: false });
+    if (!error) {
+      items = data;
+      render();
+    }
   }
 
   function render() {
@@ -259,9 +271,9 @@
       : visible.map(it => `
           <li class="item${it.done ? ' done' : ''}">
             <input type="checkbox" ${it.done ? 'checked' : ''}
-              onchange="toggle('${it.id}')" />
+              onchange="window._toggle('${it.id}')" />
             <span class="name">${escHtml(it.name)}</span>
-            <button class="del" onclick="remove('${it.id}')" title="삭제">✕</button>
+            <button class="del" onclick="window._remove('${it.id}')" title="삭제">✕</button>
           </li>`).join('');
 
     const total = items.length;
@@ -275,33 +287,57 @@
     clearBtn.disabled = done === 0;
   }
 
-  function addItem() {
+  async function addItem() {
     const name = input.value.trim();
     if (!name) { input.focus(); return; }
-    items.unshift({ id: crypto.randomUUID(), name, done: false });
-    input.value = '';
-    save();
-    render();
+    const { data, error } = await supabase
+      .from('shopping_items')
+      .insert({ name, done: false })
+      .select()
+      .single();
+    if (!error) {
+      items.unshift(data);
+      input.value = '';
+      render();
+    }
     input.focus();
   }
 
-  function toggle(id) {
-    items = items.map(it => it.id === id ? { ...it, done: !it.done } : it);
-    save();
-    render();
+  async function toggle(id) {
+    const item = items.find(it => it.id === id);
+    if (!item) return;
+    const { error } = await supabase
+      .from('shopping_items')
+      .update({ done: !item.done })
+      .eq('id', id);
+    if (!error) {
+      items = items.map(it => it.id === id ? { ...it, done: !it.done } : it);
+      render();
+    }
   }
 
-  function remove(id) {
-    items = items.filter(it => it.id !== id);
-    save();
-    render();
+  async function remove(id) {
+    const { error } = await supabase
+      .from('shopping_items')
+      .delete()
+      .eq('id', id);
+    if (!error) {
+      items = items.filter(it => it.id !== id);
+      render();
+    }
   }
 
-  function clearDone() {
-    if (!items.some(i => i.done)) return;
-    items = items.filter(i => !i.done);
-    save();
-    render();
+  async function clearDone() {
+    const doneIds = items.filter(i => i.done).map(i => i.id);
+    if (doneIds.length === 0) return;
+    const { error } = await supabase
+      .from('shopping_items')
+      .delete()
+      .in('id', doneIds);
+    if (!error) {
+      items = items.filter(i => !i.done);
+      render();
+    }
   }
 
   function setFilter(f, btn) {
@@ -315,9 +351,16 @@
     return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   }
 
+  // module scope 함수를 전역에 노출
+  window._toggle = toggle;
+  window._remove = remove;
+  window.addItem = addItem;
+  window.clearDone = clearDone;
+  window.setFilter = setFilter;
+
   input.addEventListener('keydown', e => { if (e.key === 'Enter') addItem(); });
 
-  render();
+  loadItems();
 </script>
 </body>
 </html>
